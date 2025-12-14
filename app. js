@@ -1,0 +1,424 @@
+(() => {
+  const $ = (sel) => document.querySelector(sel);
+
+  const ALLOWED_LOGINS = Array.from({ length: 15 }, (_, i) => `4GL${i + 1}`);
+  const STUDENT_PIN = "2844";
+
+  const state = {
+    user: null,
+    screen: "login", // login | menu | module | lesson | chat
+    unitId: null,
+    lessonIndex: null,
+  };
+
+  // ---- Helpers: storage keys
+  const sk = (suffix) => `AIBAYAN4_${state.user || "GUEST"}_${suffix}`;
+  const getJSON = (k, d) => { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } };
+  const setJSON = (k, v) => localStorage.setItem(k, JSON.stringify(v));
+
+  function totalStarsAll() {
+    const all = getJSON(sk("stars_all"), {});
+    return Object.values(all).reduce((a,b)=>a+(b||0),0);
+  }
+  function setLessonStars(unitId, lessonIndex, stars) {
+    const all = getJSON(sk("stars_all"), {});
+    all[`${unitId}_L${lessonIndex}`] = stars;
+    setJSON(sk("stars_all"), all);
+  }
+  function getLessonStars(unitId, lessonIndex) {
+    const all = getJSON(sk("stars_all"), {});
+    return all[`${unitId}_L${lessonIndex}`] || 0;
+  }
+
+  // ---- Speech
+  function speak(text) {
+    try {
+      window.speechSynthesis.cancel();
+      const u = new SpeechSynthesisUtterance(text);
+      u.lang = "en-US";
+      u.rate = 0.95;
+      window.speechSynthesis.speak(u);
+    } catch {}
+  }
+
+  // ---- SVG image (offline)
+  function svgDataUri(word, bg1, bg2) {
+    const label = word.replace(/&/g, "and").slice(0, 18);
+    const svg =
+`<svg xmlns="http://www.w3.org/2000/svg" width="300" height="300">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="${bg1}"/>
+      <stop offset="1" stop-color="${bg2}"/>
+    </linearGradient>
+  </defs>
+  <rect width="300" height="300" rx="42" fill="url(#g)"/>
+  <circle cx="150" cy="120" r="64" fill="rgba(255,255,255,.35)"/>
+  <text x="150" y="132" text-anchor="middle" font-size="56" font-family="Arial" font-weight="900" fill="rgba(10,20,30,.78)">${label[0].toUpperCase()}</text>
+  <text x="150" y="220" text-anchor="middle" font-size="22" font-family="Arial" font-weight="900" fill="rgba(255,255,255,.92)">${label}</text>
+</svg>`;
+    return "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg);
+  }
+
+  // ---- Theme colors per module (bright + tasty)
+  const THEME = {
+    "u1": { top:"#0b6d77", a:"#ff5aa0", b:"#7b41ff", light:"#f7e9ff" },
+    "u2": { top:"#0b6d77", a:"#00b894", b:"#0984e3", light:"#e9fff7" },
+    "u3": { top:"#0b6d77", a:"#fdcb6e", b:"#e17055", light:"#fff6e8" },
+    "u4": { top:"#0b6d77", a:"#74b9ff", b:"#6c5ce7", light:"#eef3ff" },
+    "u5": { top:"#0b6d77", a:"#ff7675", b:"#fd79a8", light:"#ffeaf0" },
+    "u6": { top:"#0b6d77", a:"#55efc4", b:"#00cec9", light:"#e9fffd" },
+    "u7": { top:"#0b6d77", a:"#a29bfe", b:"#fd79a8", light:"#f2edff" },
+    "u8": { top:"#0b6d77", a:"#ffeaa7", b:"#fab1a0", light:"#fff7ea" },
+  };
+
+  function render() {
+    const app = $("#app");
+
+    if (state.screen === "login") {
+      const heroA = "#0b6d77";
+      const heroB = "#0f3a56";
+      app.innerHTML = `
+        <div class="login-wrap">
+          <div class="login-hero" style="background:linear-gradient(135deg,${heroA},${heroB});">
+            <div class="hero-logo"><img src="logo.png" alt="logo"></div>
+            <div style="font-weight:1000;font-size:30px;letter-spacing:.5px;">AI Bayan Dictionary</div>
+            <div style="opacity:.9;font-weight:900;margin-top:6px;">4 GRADE</div>
+          </div>
+
+          <div class="login-card">
+            <div style="font-weight:1000;font-size:18px;">Enter your login and PIN</div>
+            <input id="login" class="input" placeholder="Login (4GL1 - 4GL15)" />
+            <input id="pin" class="input" placeholder="PIN" inputmode="numeric" />
+            <button id="enter" class="btn" style="width:100%;margin-top:12px;background:linear-gradient(135deg,#ffd36e,#ff5aa0);">Enter</button>
+            <div id="err" style="margin-top:10px;font-weight:900;color:#b11c1c;"></div>
+          </div>
+        </div>
+      `;
+      $("#enter").onclick = () => {
+        const login = ($("#login").value || "").trim();
+        const pin = ($("#pin").value || "").trim();
+        if (!ALLOWED_LOGINS.includes(login) || pin !== STUDENT_PIN) {
+          $("#err").textContent = "Wrong login or PIN";
+          return;
+        }
+        state.user = login;
+        state.screen = "menu";
+        render();
+      };
+      return;
+    }
+
+    // shared footer (menu/module/lesson/chat)
+    const footer = `
+      <div class="footerbar">
+        <div class="footerbar-inner">
+          <div class="footer-card" style="text-align:left;">
+            <div style="font-size:14px;font-weight:1000;">Progress</div>
+            <div style="margin-top:6px;font-size:18px;">⭐ Total stars: ${totalStarsAll()}</div>
+          </div>
+
+          <button class="footer-card" id="chatBtn" style="background:linear-gradient(135deg,#0b6d77,#7b41ff);color:#fff;">
+            AI Bayan<br/>Chat
+          </button>
+
+          <button class="footer-card" id="logoutBtn" style="background:linear-gradient(135deg,#ff5a5a,#ff2d55);color:#fff;">
+            Logout
+          </button>
+        </div>
+      </div>
+    `;
+
+    if (state.screen === "menu") {
+      const top = "#0b6d77";
+      app.innerHTML = `
+        <div class="topbar" style="background:${top};">
+          <div class="topbar-inner">
+            <div class="logo"><img src="logo.png" alt="logo"></div>
+            <div class="titlebox">
+              <div class="app-title">AI BAYAN DICTIONARY 4gr</div>
+              <div class="sub">${state.user}</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="container">
+          <div class="card">
+            <div style="font-weight:1000;font-size:22px;">Modules</div>
+            <div style="color:var(--muted);font-weight:900;margin-top:6px;">Choose a module</div>
+          </div>
+
+          <div class="grid" style="margin-top:12px;">
+            ${window.APP_DATA.units.map(u => {
+              const th = THEME[u.id] || THEME["u1"];
+              return `
+                <button class="unit-btn" data-unit="${u.id}" style="border-color:${th.a}55;">
+                  <div class="u1">Module ${u.num}</div>
+                  <div class="u2">${u.title}</div>
+                </button>
+              `;
+            }).join("")}
+          </div>
+        </div>
+
+        ${footer}
+      `;
+
+      document.querySelectorAll("[data-unit]").forEach(btn=>{
+        btn.onclick = () => {
+          state.unitId = btn.getAttribute("data-unit");
+          state.lessonIndex = null;
+          state.screen = "module";
+          render();
+        };
+      });
+
+      $("#chatBtn").onclick = () => { state.screen="chat"; render(); };
+      $("#logoutBtn").onclick = () => { state.user=null; state.screen="login"; render(); };
+      return;
+    }
+
+    if (state.screen === "chat") {
+      const top = "#0b6d77";
+      app.innerHTML = `
+        <div class="topbar" style="background:${top};">
+          <div class="topbar-inner">
+            <div class="logo"><img src="logo.png" alt="logo"></div>
+            <div class="titlebox">
+              <div class="app-title">AI Bayan Chat</div>
+              <div class="sub">Main Menu only</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="container">
+          <div class="card">
+            <div style="font-weight:1000;font-size:18px;">Chat placeholder</div>
+            <div style="color:var(--muted);font-weight:900;margin-top:8px;">
+              If you want, later we can connect real AI (Cloudflare Worker / OpenAI).
+            </div>
+            <button class="btn secondary" id="backMenu" style="margin-top:12px;">← Back to Main Menu</button>
+          </div>
+        </div>
+
+        ${footer}
+      `;
+      $("#backMenu").onclick = ()=>{ state.screen="menu"; render(); };
+      $("#chatBtn").onclick = ()=>{};
+      $("#logoutBtn").onclick = ()=>{ state.user=null; state.screen="login"; render(); };
+      return;
+    }
+
+    // module screen
+    if (state.screen === "module") {
+      const unit = window.APP_DATA.units.find(u=>u.id===state.unitId);
+      const th = THEME[unit.id] || THEME["u1"];
+      app.innerHTML = `
+        <div class="topbar" style="background:linear-gradient(135deg,${th.a},${th.b});">
+          <div class="topbar-inner">
+            <div class="logo"><img src="logo.png" alt="logo"></div>
+            <div class="titlebox">
+              <div class="app-title">Module ${unit.num} — ${unit.title}</div>
+              <div class="sub">${state.user}</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="container" style="background:${th.light};border-radius:26px;">
+          <div class="card">
+            <div class="row" style="justify-content:space-between;">
+              <div>
+                <div style="font-weight:1000;font-size:20px;">Lessons</div>
+                <div style="color:var(--muted);font-weight:900;margin-top:6px;">Choose lesson 1–8</div>
+              </div>
+              <button class="btn secondary" id="backMain">← Main Menu</button>
+            </div>
+
+            <div class="lesson-grid" style="margin-top:12px;">
+              ${unit.lessons.map((ls, idx)=>{
+                const stars = getLessonStars(unit.id, idx+1);
+                const bg = idx%2===0 ? `${th.a}` : `${th.b}`;
+                return `
+                  <button class="lesson-btn" data-lesson="${idx+1}"
+                    style="background:linear-gradient(135deg,${bg},#ffffff); border:2px solid rgba(0,0,0,.06);">
+                    Lesson ${idx+1}
+                    <small>⭐ ${stars}</small>
+                  </button>
+                `;
+              }).join("")}
+            </div>
+          </div>
+        </div>
+
+        ${footer}
+      `;
+
+      $("#backMain").onclick = ()=>{ state.screen="menu"; render(); };
+      document.querySelectorAll("[data-lesson]").forEach(b=>{
+        b.onclick = ()=>{
+          state.lessonIndex = Number(b.getAttribute("data-lesson"));
+          state.screen = "lesson";
+          render();
+        };
+      });
+
+      $("#chatBtn").onclick = () => { state.screen="chat"; render(); };
+      $("#logoutBtn").onclick = () => { state.user=null; state.screen="login"; render(); };
+      return;
+    }
+
+    // lesson screen
+    if (state.screen === "lesson") {
+      const unit = window.APP_DATA.units.find(u=>u.id===state.unitId);
+      const th = THEME[unit.id] || THEME["u1"];
+      const lesson = unit.lessons[state.lessonIndex-1];
+
+      const attemptKey = sk(`attempt_${unit.id}_L${state.lessonIndex}`);
+      const alreadyDone = !!localStorage.getItem(attemptKey);
+
+      // build quiz (1 attempt)
+      const words = lesson.words;
+      const qIndex = getJSON(sk(`quiz_index_${unit.id}_L${state.lessonIndex}`), 0);
+      const current = words[Math.min(qIndex, words.length-1)];
+
+      function pickOptions(correctRu) {
+        const pool = [...new Set(words.map(w=>w.ru))].filter(Boolean);
+        const wrong = pool.filter(x=>x!==correctRu);
+        const opts = [correctRu];
+        while(opts.length<4 && wrong.length){
+          opts.push(wrong.splice(Math.floor(Math.random()*wrong.length),1)[0]);
+        }
+        return opts.sort(()=>Math.random()-0.5);
+      }
+
+      const options = current ? pickOptions(current.ru) : [];
+      const starsNow = getLessonStars(unit.id, state.lessonIndex);
+
+      app.innerHTML = `
+        <div class="topbar" style="background:linear-gradient(135deg,${th.a},${th.b});">
+          <div class="topbar-inner">
+            <div class="logo"><img src="logo.png" alt="logo"></div>
+            <div class="titlebox">
+              <div class="app-title">Module ${unit.num} • Lesson ${state.lessonIndex}</div>
+              <div class="sub">${unit.title}</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="container" style="background:${th.light};border-radius:26px;">
+          <div class="card">
+            <div class="row" style="justify-content:space-between;">
+              <div class="badge">⭐ Stars in this lesson: <span id="stars">${starsNow}</span></div>
+              <div class="row">
+                <button class="btn secondary" id="printBtn">Print</button>
+                <button class="btn secondary" id="backUnit">← Back</button>
+                <button class="btn secondary" id="backMain">🏠 Main Menu</button>
+              </div>
+            </div>
+
+            <div style="margin-top:12px;font-weight:1000;font-size:20px;">Visual Vocabulary</div>
+
+            <div style="margin-top:10px;display:grid;gap:10px;">
+              ${words.map(w=>{
+                const img = svgDataUri(w.en, th.a, th.b);
+                return `
+                  <div class="vocab-item">
+                    <div class="vimg"><img src="${img}" alt="${w.en}"></div>
+                    <div>
+                      <div class="word">${w.en}</div>
+                      <div class="tr">${w.ru || ""}</div>
+                      <div class="ph">${w.phon || ""}</div>
+                      <div class="row" style="margin-top:8px;">
+                        <button class="btn" data-say="${encodeURIComponent(w.en)}"
+                          style="background:linear-gradient(135deg,${th.a},${th.b});color:#fff;">▶ Say</button>
+                      </div>
+                    </div>
+                  </div>
+                `;
+              }).join("")}
+            </div>
+
+            <div class="quiz" style="margin-top:14px;">
+              <div style="font-weight:1000;font-size:18px;">Quiz (1 attempt): choose RU translation</div>
+              ${alreadyDone ? `
+                <div class="result ok" style="margin-top:10px;">✅ Attempt finished. Stars saved.</div>
+              ` : current ? `
+                <div class="vocab-item" style="margin-top:10px;">
+                  <div class="vimg"><img src="${svgDataUri(current.en, th.a, th.b)}" alt=""></div>
+                  <div>
+                    <div class="word">${current.en}</div>
+                    <div class="ph">${current.phon || ""}</div>
+                    <button class="btn" id="sayCurrent" style="margin-top:8px;background:linear-gradient(135deg,${th.a},${th.b});color:#fff;">▶ Say word</button>
+                  </div>
+                </div>
+
+                <div class="options">
+                  ${options.map(opt=>`<button class="opt" data-opt="${encodeURIComponent(opt)}">${opt}</button>`).join("")}
+                </div>
+
+                <div id="res" class="result"></div>
+              ` : `<div class="result">No words in this lesson.</div>`}
+            </div>
+          </div>
+        </div>
+
+        ${footer}
+      `;
+
+      // vocab speak
+      document.querySelectorAll("[data-say]").forEach(b=>{
+        b.onclick = ()=> speak(decodeURIComponent(b.getAttribute("data-say")));
+      });
+
+      // buttons
+      $("#backUnit").onclick = ()=>{ state.screen="module"; render(); };
+      $("#backMain").onclick = ()=>{ state.screen="menu"; render(); };
+      $("#printBtn").onclick = ()=> window.print();
+
+      $("#chatBtn").onclick = () => { state.screen="chat"; render(); };
+      $("#logoutBtn").onclick = () => { state.user=null; state.screen="login"; render(); };
+
+      if (!alreadyDone && current) {
+        $("#sayCurrent").onclick = ()=> speak(current.en);
+
+        document.querySelectorAll(".opt").forEach(btn=>{
+          btn.onclick = ()=>{
+            const chosen = decodeURIComponent(btn.getAttribute("data-opt"));
+            const correct = current.ru;
+            const res = $("#res");
+
+            // disable all
+            document.querySelectorAll(".opt").forEach(x=>x.disabled=true);
+
+            if (chosen === correct) {
+              const newStars = starsNow + 1;
+              setLessonStars(unit.id, state.lessonIndex, newStars);
+              $("#stars").textContent = newStars;
+              res.className = "result ok";
+              res.textContent = "✅ Correct +1⭐";
+            } else {
+              res.className = "result bad";
+              res.textContent = "❌ Wrong";
+            }
+
+            // next question or finish attempt
+            const nextIndex = qIndex + 1;
+            if (nextIndex >= words.length) {
+              localStorage.setItem(attemptKey, "done");
+              setJSON(sk(`quiz_index_${unit.id}_L${state.lessonIndex}`), 0);
+              setTimeout(()=>render(), 650);
+            } else {
+              setJSON(sk(`quiz_index_${unit.id}_L${state.lessonIndex}`), nextIndex);
+              setTimeout(()=>render(), 650);
+            }
+          };
+        });
+      }
+
+      return;
+    }
+  }
+
+  // boot
+  render();
+})();

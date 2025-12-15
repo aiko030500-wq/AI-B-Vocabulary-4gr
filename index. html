@@ -5,19 +5,17 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>AI Bayan Dictionary 4gr</title>
 
-  <!-- Styles -->
   <link rel="stylesheet" href="styles.css" />
-
-  <!-- Theme color for mobile -->
   <meta name="theme-color" content="#0b6d77" />
 </head>
 
 <body>
-  <!-- App root -->
   <div id="app"></div>
 
   <!-- DATA (must be before app.js) -->
   <script src="data.js"></script>
 
   <!-- App logic -->
-  <script src="
+  <script src="app.js"></script>
+</body>
+</html>
